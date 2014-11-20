@@ -125,13 +125,49 @@ display_all_contacts()
 	display_contact_info
 }
 
+# Return value in $SELECTION
+display_menu()
+{
+    echo "Please select a menu option:"
+    echo ""
+    echo "1: List contacts"
+    echo "2: Search contacts"
+    echo "3: Add contact"
+    echo "4: Delete contact"
+    echo "0: Quit"
+    echo ""
+    
+    SELECTION=-1
+    while [ $SELECTION -lt 0 -o $SELECTION -gt 4 ]
+    do
+        read -p "Option: " SELECTION
+        
+        # Make sure the selection is an integer
+        echo $SELECTION | egrep -q "[0-9]+"
+        if [ $? -eq 1 ]
+        then
+            # Not an integer, set it to an invalid value and try again
+            SELECTION=-1
+        fi
+    done
+}
 
-#First, log in if possible
+# Login
 login_auth
 
-#Now display all contacts available
-display_all_contacts
+while [ 1 -eq 1 ]
+do
+    display_menu
 
-
-
-
+    case $SELECTION in
+        1)
+            display_all_contacts
+            ;;
+        0)
+            echo "Quitting..."
+            exit 0
+            ;;
+    esac
+    
+    echo ""
+done
