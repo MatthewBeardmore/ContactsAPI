@@ -4,14 +4,77 @@
 #Google Contacts API script 
 #11/11/2014
 
+# Constants
+API_CLIENT_ID="1029985346719-4ecd3h4k1s8l2v3i7hn8okobu5ct0jiq.apps.googleusercontent.com"
+API_CLIENT_SECRET="z7s_zY2MjT6AC7IruKO-BVCL"
+API_SCOPE="https://www.google.com/m8/feeds"
+
+# Output:
+#    ACCESS_TOKEN set to the cached access token if it is valid; an empty 
+#    string otherwise.
+verify_cached_access_token()
+{
+    ACCESS_TOKEN=""
+    
+    # Check to see if there's already a valid access token cached from a previous run
+    if [ ! -f .contacts_access_token ]
+    then
+        return
+    fi
+    
+    # Load the cached token
+    CACHED_TOKEN=`cat .contacts_access_token`
+    
+    # Ask Google if this is a valid access token
+    output=`wget -qO- https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=$CACHED_TOKEN`
+    echo $?
+    if [ $? -ne 0 ]
+    then
+        # Token is not valid
+        return
+    fi
+    
+    # Verify that the access token is valid for our program
+    echo "$output" | grep -q "$API_CLIENT_ID"
+    
+    if [ $? -ne 0 ]
+    then
+        # Access token not issued to our client ID
+        return
+    fi
+    
+    # Verify that the scope is correct
+    echo "$output" | grep -q "$API_SCOPE"
+    
+    if [ $? -ne 0 ]
+    then
+        # The scope we need isn't assigned to the token
+        return
+    fi
+    
+    # Token works, use it
+    ACCESS_TOKEN=$CACHED_TOKEN
+}
+
 #Logs the user in and gains access to the user's contacts
 login_auth()
 {
+    verify_cached_access_token
+    echo $ACCESS_TOKEN
+    if [ ! -z "$ACCESS_TOKEN" ]
+    then
+        # Use the cached access token
+        return
+    fi
+
+    # Remove any cached access token, since it's not valid
+    rm .contacts_access_token 2> /dev/null
+
 	#Get information for OAuth from the Google OAuth 2.0 server
 	#Contains device_code, user_code, verification_url, and interval
 	#verfication_url and user_code must be given to the user so that they can authorize our script
 	#We use device_code and interval to get an access_token once the user gives our script access on Google's websitee
-	output=`wget -qO- --post-data 'client_id=1029985346719-4ecd3h4k1s8l2v3i7hn8okobu5ct0jiq.apps.googleusercontent.com&scope=https://www.google.com/m8/feeds' https://accounts.google.com/o/oauth2/device/code`
+	output=`wget -qO- --post-data "client_id=$API_CLIENT_ID&scope=$API_SCOPE" https://accounts.google.com/o/oauth2/device/code`
 
 	#Get the inforation from the JSON by greping for the line with the information we want and
 	# using awk to get the information we need
@@ -35,7 +98,7 @@ login_auth()
 	while true
 	do
 		#Ask the server if we have been authorized yet...
-		output=`wget -qO- --post-data "client_id=1029985346719-4ecd3h4k1s8l2v3i7hn8okobu5ct0jiq.apps.googleusercontent.com&client_secret=z7s_zY2MjT6AC7IruKO-BVCL&code=$DEVICE_CODE&grant_type=http://oauth.net/grant_type/device/1.0" https://accounts.google.com/o/oauth2/token`
+		output=`wget -qO- --post-data "client_id=$API_CLIENT_ID&client_secret=$API_CLIENT_SECRET&code=$DEVICE_CODE&grant_type=http://oauth.net/grant_type/device/1.0" https://accounts.google.com/o/oauth2/token`
 
 		#See whether there is a line in the JSON that contains with "error" :
 		ERROR=`echo "$output" | grep '"error" : '`
@@ -48,6 +111,9 @@ login_auth()
 			ACCESS_TOKEN=`echo "$output" | grep '"access_token" : '`
 			ACCESS_TOKEN=`echo $ACCESS_TOKEN | awk 'BEGIN{FS="\""};{print $4}'`
 
+            # Save the access token for future program runs
+            echo -n "$ACCESS_TOKEN" > .contacts_access_token
+            
 			break
 		fi
 		#There was an error... keep waiting with the specified time sent by Google
