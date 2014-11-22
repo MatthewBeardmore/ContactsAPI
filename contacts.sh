@@ -27,7 +27,7 @@ verify_cached_access_token()
     
     # Ask Google if this is a valid access token
     output=`wget -qO- https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=$CACHED_TOKEN`
-    echo $?
+
     if [ $? -ne 0 ]
     then
         # Token is not valid
@@ -60,7 +60,7 @@ verify_cached_access_token()
 login_auth()
 {
     verify_cached_access_token
-    echo $ACCESS_TOKEN
+
     if [ ! -z "$ACCESS_TOKEN" ]
     then
         # Use the cached access token
@@ -133,6 +133,9 @@ login_auth()
 #Displays contact info stored in $CONTACT_INFO in a nicely formatted table
 display_contact_info()
 {
+    # Filter the response only to items we care about
+    CONTACTS_INFO=`echo "$CONTACTS_FULL" | awk '/<entry/ { show=1 } show && (/<title/ || /<gd:phoneNumber/ || /gd:email/) { print }; /<\/entry>/ { show=0; print }'`
+    
 	#Print out the top information about the table
 	printf "%-25s %-15s %-30s\n\n" "Contact Name" "Phone Number" "Email"
 	while read -r LINE; do
@@ -183,12 +186,28 @@ display_all_contacts()
 {
 	#Fetch the contacts file from Google with our access token
 	CONTACTS_FULL=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full`
-
-	#Get rid of anything that is not the contact name, the phone number, the email, and the end of entry tag
-	CONTACTS_INFO=`echo "$CONTACTS_FULL" | awk '/<entry>/ { show=1 } show && (/<title/ || /<gd:phoneNumber/ || /gd:email/) { print }; /<\/entry>/ { show=0; print }'`
-
+    
 	#Have this method display the info in a table
 	display_contact_info
+}
+
+# Parameters:
+#     1: Query string
+search_for_contacts()
+{
+	CONTACTS_FULL=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full?q=$1\&v=3.0`
+
+    echo ""
+    
+    # Check to see if any results were found
+    NUM_RESULTS=`echo "$CONTACTS_FULL" | grep openSearch:totalResults | awk 'BEGIN { FS="[<>]" } { print $3 }'`
+    
+    if [ ! -z "$NUM_RESULTS" -a "$NUM_RESULTS" == "0" ]
+    then
+        echo "No results found!"
+    else
+        display_contact_info
+    fi
 }
 
 # Return value in $SELECTION
@@ -228,6 +247,10 @@ do
     case $SELECTION in
         1)
             display_all_contacts
+            ;;
+        2)
+            read -p "Query: " QUERY
+            search_for_contacts $QUERY
             ;;
         0)
             echo "Quitting..."
