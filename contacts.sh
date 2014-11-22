@@ -151,77 +151,35 @@ display_contact_info()
 {
     parse_contact_info
     
-    #Print out the top information about the table
+    # Print out the table header
 	printf "  # | %-25s | %-15s | %-30s\n" "Contact Name" "Phone Number" "Email"
-    echo "--------------------------------+-----------------+-----------------"
+    echo "----+---------------------------+-----------------+-----------------"
     
-    #Print out all the contact info we have for them
+    # Print out all the contact info we have for them
     for i in `seq 0 $(((${#OUTPUT[@]}-1)/4))`
     do
-        CONTACT_NAME=${OUTPUT[$i*4]}
-        CONTACT_PHONE_NUM=${OUTPUT[$i*4+1]}
-        CONTACT_EMAIL=${OUTPUT[$i*4+2]}
+        local name=${OUTPUT[$i*4]}
+        local phone=${OUTPUT[$i*4+1]}
+        local email=${OUTPUT[$i*4+2]}
         
-        printf " %2d | %-25s | %-15s | %-30s\n" "$(($i+1))" "$CONTACT_NAME" "$CONTACT_PHONE_NUM" "$CONTACT_EMAIL"
+        printf " %2d | %-25s | %-15s | %-30s\n" "$(($i+1))" "$name" "$phone" "$email"
     done
 }
 
 parse_contact_info()
 {
-    # Filter the response only to items we care about
-    CONTACTS_INFO=`echo "$CONTACTS_FULL" | awk '/<entry/ { show=1 } show && (/<title/ || /<gd:phoneNumber/ || /<gd:email/ || /<link.*rel=\"edit\"/) { print }; /<\/entry>/ { show=0; print }'`
-    
+    # Clear any output from previous runs
     unset OUTPUT
     
-    ROW_NUMBER=0
+    local row_num=0
 	while read -r LINE; do
-		if [ "${LINE:0:6}" == "<title" ]
-		then
-			#Get the contact name from the value portion of the XML
-			CONTACT_NAME=`echo $LINE | awk 'BEGIN { FS="[<>]" } { print $3 }'`
-		elif [ "${LINE:0:15}" == "<gd:phoneNumber" ]
-		then
-			#Get the phone number from the value portion of the XML
-			CONTACT_PHONE_NUM=`echo $LINE | awk 'BEGIN { FS="[<>]" } { print $3 }'`
-			#Clean up the phone number a bit by getting rid of -, +, (), and spaces
-			CONTACT_PHONE_NUM=`echo "$CONTACT_PHONE_NUM" | tr -d '-' | tr -d ' ' | sed 's/[\+\(\)]//g'`
-			#Now let's normalize the number so that it looks pretty by adding a 1 to the beginning if it's not there
-			if [ "${#CONTACT_PHONE_NUM}" == "10" ]
-			then
-				CONTACT_PHONE_NUM="1$CONTACT_PHONE_NUM"
-			fi
+        OUTPUT[$(($row_num*4))]=`echo "$LINE" | cut -f 1`
+        OUTPUT[$(($row_num*4+1))]=`echo "$LINE" | cut -f 2`
+        OUTPUT[$(($row_num*4+2))]=`echo "$LINE" | cut -f 3`
+        OUTPUT[$(($row_num*4+3))]=`echo "$LINE" | cut -f 4`
 
-			#Clean up further by adding - at the correct positions
-			CONTACT_PHONE_NUM="${CONTACT_PHONE_NUM:0:1}-${CONTACT_PHONE_NUM:1:3}-${CONTACT_PHONE_NUM:4:3}-${CONTACT_PHONE_NUM:7:11}"
-		elif [ "${LINE:0:9}" == "<gd:email" ]
-		then
-			#Get the field that starts with "address="
-			CONTACT_EMAIL=`echo $LINE | awk '{ for(i=1;i<=NF;i++) { if ($i ~ /address=/) {print $i; } } }'`
-			#remove the address="email@test.com" and get only the email address itself
-			CONTACT_EMAIL=`echo $CONTACT_EMAIL | cut -d '"' -f2 | tr -d '"'`
-        elif [ "${LINE:0:5}" == "<link" ]
-        then
-            CONTACT_EDIT_LINK=`echo $LINE | awk '{ match($0, /href=\"(.*)\"/, arr); print arr[1]; }'`
-		elif [ "$LINE" == "</entry>" ]
-		then
-			#If we have a name for this contact, print it out with any info we have for it
-			if [ ! -z "$CONTACT_NAME" ]
-			then
-                OUTPUT[$(($ROW_NUMBER*4))]="$CONTACT_NAME"
-                OUTPUT[$(($ROW_NUMBER*4+1))]="$CONTACT_PHONE_NUM"
-                OUTPUT[$(($ROW_NUMBER*4+2))]="$CONTACT_EMAIL"
-                OUTPUT[$(($ROW_NUMBER*4+3))]="$CONTACT_EDIT_LINK"
-                
-                ROW_NUMBER=$(($ROW_NUMBER+1))
-			fi
-            
-			#Clear out the info for this entry
-			CONTACT_NAME=""
-			CONTACT_PHONE_NUM=""
-			CONTACT_EMAIL=""
-            CONTACT_EDIT_LINK=""
-		fi
-	done <<< "$CONTACTS_INFO" 
+        row_num=$(($row_num+1))
+	done < <(echo "$CONTACTS_FULL" | awk -f parse_contacts_list.awk)
 }
 
 #Displays all contacts that are available for the Google account we have access to
@@ -237,16 +195,17 @@ display_all_contacts()
 
 search_for_contacts()
 {
-    read -p "Query: " QUERY
+    local query=""
+    read -p "Query: " query
     
-	CONTACTS_FULL=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full?q=$1\&v=3.0`
+	CONTACTS_FULL=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full?q=$query\&v=3.0`
 
     echo ""
     
     # Check to see if any results were found
-    NUM_RESULTS=`echo "$CONTACTS_FULL" | grep openSearch:totalResults | awk 'BEGIN { FS="[<>]" } { print $3 }'`
+    local num_results=`echo "$CONTACTS_FULL" | grep openSearch:totalResults | awk 'BEGIN { FS="[<>]" } { print $3 }'`
     
-    if [ ! -z "$NUM_RESULTS" -a "$NUM_RESULTS" == "0" ]
+    if [ ! -z "$num_results" -a "$num_results" == "0" ]
     then
         echo "No results found!"
     else
