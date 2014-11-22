@@ -137,7 +137,9 @@ display_contact_info()
     CONTACTS_INFO=`echo "$CONTACTS_FULL" | awk '/<entry/ { show=1 } show && (/<title/ || /<gd:phoneNumber/ || /gd:email/) { print }; /<\/entry>/ { show=0; print }'`
     
 	#Print out the top information about the table
-	printf "%-25s %-15s %-30s\n\n" "Contact Name" "Phone Number" "Email"
+	printf "%-25s %-15s %-30s\n" "Contact Name" "Phone Number" "Email"
+    echo "-----------------------------------------------------------"
+
 	while read -r LINE; do
 		if [ "${LINE:0:6}" == "<title" ]
 		then
@@ -191,10 +193,10 @@ display_all_contacts()
 	display_contact_info
 }
 
-# Parameters:
-#     1: Query string
 search_for_contacts()
 {
+    read -p "Query: " QUERY
+    
 	CONTACTS_FULL=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full?q=$1\&v=3.0`
 
     echo ""
@@ -206,6 +208,60 @@ search_for_contacts()
     then
         echo "No results found!"
     else
+        display_contact_info
+    fi
+}
+
+add_contact()
+{
+    read -p "Name: " NEW_CONTACT_NAME
+    read -p "Phone: " NEW_CONTACT_PHONE
+    read -p "Email: " NEW_CONTACT_EMAIL
+
+    TEMPLATE=`cat new_contact_template.xml`
+    
+    if [ -z "$NEW_CONTACT_NAME" -a -z "$NEW_CONTACT_EMAIL" -a -z "$NEW_CONTACT_PHONE" ]
+    then
+        echo "Contact not added."
+        return
+    fi
+    
+    if [ ! -z "$NEW_CONTACT_NAME" ]
+    then
+        TEMPLATE=`echo "$TEMPLATE" | sed s/{{NAME}}/"$NEW_CONTACT_NAME"/`
+    else
+        TEMPLATE=`echo "$TEMPLATE" | sed /{{NAME}}/d`
+    fi
+    
+    if [ ! -z "$NEW_CONTACT_EMAIL" ]
+    then
+        TEMPLATE=`echo "$TEMPLATE" | sed s/{{EMAIL}}/"$NEW_CONTACT_EMAIL"/`
+    else
+        TEMPLATE=`echo "$TEMPLATE" | sed /{{EMAIL}}/d`
+    fi
+    
+    if [ ! -z "$NEW_CONTACT_PHONE" ]
+    then
+        TEMPLATE=`echo "$TEMPLATE" | sed s/{{PHONE}}/"$NEW_CONTACT_PHONE"/`
+    else
+        TEMPLATE=`echo "$TEMPLATE" | sed /{{PHONE}}/d`
+    fi
+    
+    echo ""
+    echo "Adding contact..."
+    
+    # Add the new contact
+    RESULT=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" --header="Content-Type: application/atom+xml" --post-data "$TEMPLATE" https://www.google.com/m8/feeds/contacts/default/full`
+    
+    if [ $? -ne 0 ]
+    then
+        # Contact was not added successfully
+        echo "An error occurred while adding the new contact!"
+    else
+        echo "Contact added successfully!"
+        echo ""
+        
+        CONTACTS_FULL=$RESULT
         display_contact_info
     fi
 }
@@ -249,8 +305,10 @@ do
             display_all_contacts
             ;;
         2)
-            read -p "Query: " QUERY
-            search_for_contacts $QUERY
+            search_for_contacts
+            ;;
+        3)
+            add_contact
             ;;
         0)
             echo "Quitting..."
