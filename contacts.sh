@@ -137,8 +137,8 @@ display_contact_info()
     CONTACTS_INFO=`echo "$CONTACTS_FULL" | awk '/<entry/ { show=1 } show && (/<title/ || /<gd:phoneNumber/ || /gd:email/) { print }; /<\/entry>/ { show=0; print }'`
     
 	#Print out the top information about the table
-	printf "%-25s %-15s %-30s\n" "Contact Name" "Phone Number" "Email"
-    echo "-----------------------------------------------------------"
+	printf "%-25s | %-15s | %-30s\n" "Contact Name" "Phone Number" "Email"
+    echo "--------------------------+-----------------+-----------------"
 
 	while read -r LINE; do
 		if [ "${LINE:0:6}" == "<title" ]
@@ -171,7 +171,7 @@ display_contact_info()
 			if [ ! -z "$CONTACT_NAME" ]
 			then
 				#Print out all the contact info we have for them
-				printf "%-25s %-15s %-30s\n" "$CONTACT_NAME" "$CONTACT_PHONE_NUM" "$CONTACT_EMAIL"
+				printf "%-25s | %-15s | %-30s\n" "$CONTACT_NAME" "$CONTACT_PHONE_NUM" "$CONTACT_EMAIL"
 			fi
 			
 			#Clear out the info for this entry
