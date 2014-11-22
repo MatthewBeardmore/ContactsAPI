@@ -1,8 +1,8 @@
 #!/bin/bash
-#Matthew Beardmore and Matthew Bowen
-#Introduction to Scripting: Project 2
-#Google Contacts API script 
-#11/11/2014
+# Matthew Beardmore and Matthew Bowen
+# Introduction to Scripting: Project 2
+# Google Contacts API script 
+# 11/11/2014
 
 # Constants
 API_CLIENT_ID="1029985346719-4ecd3h4k1s8l2v3i7hn8okobu5ct0jiq.apps.googleusercontent.com"
@@ -12,7 +12,7 @@ API_SCOPE="https://www.google.com/m8/feeds"
 # Output:
 #    ACCESS_TOKEN set to the cached access token if it is valid; an empty 
 #    string otherwise.
-verify_cached_access_token()
+get_cached_access_token()
 {
     ACCESS_TOKEN=""
     
@@ -23,10 +23,10 @@ verify_cached_access_token()
     fi
     
     # Load the cached token
-    CACHED_TOKEN=`cat .contacts_access_token`
+    local cached_token=`cat .contacts_access_token`
     
     # Ask Google if this is a valid access token
-    output=`wget -qO- https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=$CACHED_TOKEN`
+    local output=`wget -qO- https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=$cached_token`
 
     if [ $? -ne 0 ]
     then
@@ -53,13 +53,31 @@ verify_cached_access_token()
     fi
     
     # Token works, use it
-    ACCESS_TOKEN=$CACHED_TOKEN
+    ACCESS_TOKEN=$cached_token
 }
 
-#Logs the user in and gains access to the user's contacts
+# $1: String
+# $2: JSON key
+#
+# Output: JSON value on stdout
+extract_json_string()
+{
+    echo "$1" | grep "$2" | awk "{ match(\$0, /\"$2\"\s*:\s*\"([^\"]*?)/, arr); print arr[1]; }"
+}
+
+# $1: String
+# $2: JSON key
+#
+# Output: JSON value on stdout
+extract_json_number()
+{
+    echo "$1" | grep "$2" | awk "{ match(\$0, /\"$2\"\s*:\s*([0-9]+)/, arr); print arr[1]; }"
+}
+
+# Logs the user in and gains access to the user's contacts
 login_auth()
 {
-    verify_cached_access_token
+    get_cached_access_token
 
     if [ ! -z "$ACCESS_TOKEN" ]
     then
@@ -74,59 +92,57 @@ login_auth()
 	#Contains device_code, user_code, verification_url, and interval
 	#verfication_url and user_code must be given to the user so that they can authorize our script
 	#We use device_code and interval to get an access_token once the user gives our script access on Google's websitee
-	output=`wget -qO- --post-data "client_id=$API_CLIENT_ID&scope=$API_SCOPE" https://accounts.google.com/o/oauth2/device/code`
+	local output=`wget -qO- --post-data "client_id=$API_CLIENT_ID&scope=$API_SCOPE" https://accounts.google.com/o/oauth2/device/code`
 
-	#Get the inforation from the JSON by greping for the line with the information we want and
-	# using awk to get the information we need
-	DEVICE_CODE=`echo "$output" | grep '"device_code" : '`
-	DEVICE_CODE=`echo $DEVICE_CODE | awk 'BEGIN{FS="\""};{print $4}'`
+	# Get the various bits of info we need
+	local device_code=`extract_json_string "$output" "device_code"`
+	local user_code=`extract_json_string "$output" "user_code"`
+	local veri_url=`extract_json_string "$output" "verification_url"`
+    local interval=`extract_json_number "$output" "interval"`
 
-	USER_CODE=`echo "$output" | grep '"user_code" : '`
-	USER_CODE=`echo $USER_CODE | awk 'BEGIN{FS="\""};{print $4}'`
+	# Tell the user where to go to be able to verify the script and the code they need
+	echo "Please go to the following URL:"
+    echo ""
+    echo "    $veri_url"
+    echo ""
+    echo "When prompted, enter the following code:"
+    echo ""
+    echo "    $user_code"
+    echo ""
+    echo "You can continue once you authorize this script."
 
-	VERI_URL=`echo "$output" | grep '"verification_url" : '`
-	VERI_URL=`echo $VERI_URL | awk 'BEGIN{FS="\""};{print $4}'`
-
-	INTERVAL=`echo "$output" | grep 'interval'`
-	INTERVAL=`echo $INTERVAL | awk 'BEGIN{FS=" "};{print $3}'`
-
-	#Tell the user where to go to be able to verify the script and the code they need
-	echo "Go to the URL '$VERI_URL' in your browser and enter the code to continue: $USER_CODE"
-
-
-	#The script now has to wait for the user to authorize the script to access their account
+    echo -n "Waiting for user authorization..."
+    
+	# The script now has to wait for the user to authorize the script to access their account
 	while true
 	do
+        # Wait for a certain number of seconds between each authorization check
+        sleep $interval
+        
 		#Ask the server if we have been authorized yet...
-		output=`wget -qO- --post-data "client_id=$API_CLIENT_ID&client_secret=$API_CLIENT_SECRET&code=$DEVICE_CODE&grant_type=http://oauth.net/grant_type/device/1.0" https://accounts.google.com/o/oauth2/token`
+		output=`wget -qO- --post-data "client_id=$API_CLIENT_ID&client_secret=$API_CLIENT_SECRET&code=$device_code&grant_type=http://oauth.net/grant_type/device/1.0" https://accounts.google.com/o/oauth2/token`
 
 		#See whether there is a line in the JSON that contains with "error" :
-		ERROR=`echo "$output" | grep '"error" : '`
+		local error=`extract_json_string "$output" "error"`
 
-		if [ -z "$ERROR" ]
+		if [ -z "$error" ]
 		then
 			#There wasn't an error, so we've been authorized!
 			#Get the access_token that we'll need to send any further requests to the contacts API
-			echo "User has authorized this project!"
-			ACCESS_TOKEN=`echo "$output" | grep '"access_token" : '`
-			ACCESS_TOKEN=`echo $ACCESS_TOKEN | awk 'BEGIN{FS="\""};{print $4}'`
+            echo " Authorized!"
+            
+			ACCESS_TOKEN=`extract_json_string "$output" "access_token"`
 
             # Save the access token for future program runs
             echo -n "$ACCESS_TOKEN" > .contacts_access_token
-            
 			break
 		fi
-		#There was an error... keep waiting with the specified time sent by Google
-		ERROR=`echo $ERROR | awk 'BEGIN{FS="\""};{print $4}'`
 
-		if [ $ERROR == "authorization_pending" ]
+		if [ $error == "authorization_pending" ]
 		then
 			#This is the error we're looking for if the user hasn't authorized us yet, still waiting...
-			echo "Waiting for user authorization..."
+			echo -n "."
 		fi
-		#Wait for the specified time before asking Google if we have been authorizedd
-		#If we don't do this, the servers will respond that we are sending too many requests
-		sleep $INTERVAL
 	done
 }
 
