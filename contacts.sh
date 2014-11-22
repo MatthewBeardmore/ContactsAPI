@@ -130,16 +130,34 @@ login_auth()
 	done
 }
 
-#Displays contact info stored in $CONTACT_INFO in a nicely formatted table
+# Displays contact info stored in $CONTACT_INFO in a nicely formatted table
 display_contact_info()
 {
-    # Filter the response only to items we care about
-    CONTACTS_INFO=`echo "$CONTACTS_FULL" | awk '/<entry/ { show=1 } show && (/<title/ || /<gd:phoneNumber/ || /gd:email/) { print }; /<\/entry>/ { show=0; print }'`
+    parse_contact_info
     
-	#Print out the top information about the table
-	printf "%-25s | %-15s | %-30s\n" "Contact Name" "Phone Number" "Email"
-    echo "--------------------------+-----------------+-----------------"
+    #Print out the top information about the table
+	printf "  # | %-25s | %-15s | %-30s\n" "Contact Name" "Phone Number" "Email"
+    echo "--------------------------------+-----------------+-----------------"
+    
+    #Print out all the contact info we have for them
+    for i in `seq 0 $(((${#OUTPUT[@]}-1)/4))`
+    do
+        CONTACT_NAME=${OUTPUT[$i*4]}
+        CONTACT_PHONE_NUM=${OUTPUT[$i*4+1]}
+        CONTACT_EMAIL=${OUTPUT[$i*4+2]}
+        
+        printf " %2d | %-25s | %-15s | %-30s\n" "$(($i+1))" "$CONTACT_NAME" "$CONTACT_PHONE_NUM" "$CONTACT_EMAIL"
+    done
+}
 
+parse_contact_info()
+{
+    # Filter the response only to items we care about
+    CONTACTS_INFO=`echo "$CONTACTS_FULL" | awk '/<entry/ { show=1 } show && (/<title/ || /<gd:phoneNumber/ || /<gd:email/ || /<link.*rel=\"edit\"/) { print }; /<\/entry>/ { show=0; print }'`
+    
+    unset OUTPUT
+    
+    ROW_NUMBER=0
 	while read -r LINE; do
 		if [ "${LINE:0:6}" == "<title" ]
 		then
@@ -165,19 +183,27 @@ display_contact_info()
 			CONTACT_EMAIL=`echo $LINE | awk '{ for(i=1;i<=NF;i++) { if ($i ~ /address=/) {print $i; } } }'`
 			#remove the address="email@test.com" and get only the email address itself
 			CONTACT_EMAIL=`echo $CONTACT_EMAIL | cut -d '"' -f2 | tr -d '"'`
+        elif [ "${LINE:0:5}" == "<link" ]
+        then
+            CONTACT_EDIT_LINK=`echo $LINE | awk '{ match($0, /href=\"(.*)\"/, arr); print arr[1]; }'`
 		elif [ "$LINE" == "</entry>" ]
 		then
 			#If we have a name for this contact, print it out with any info we have for it
 			if [ ! -z "$CONTACT_NAME" ]
 			then
-				#Print out all the contact info we have for them
-				printf "%-25s | %-15s | %-30s\n" "$CONTACT_NAME" "$CONTACT_PHONE_NUM" "$CONTACT_EMAIL"
+                OUTPUT[$(($ROW_NUMBER*4))]="$CONTACT_NAME"
+                OUTPUT[$(($ROW_NUMBER*4+1))]="$CONTACT_PHONE_NUM"
+                OUTPUT[$(($ROW_NUMBER*4+2))]="$CONTACT_EMAIL"
+                OUTPUT[$(($ROW_NUMBER*4+3))]="$CONTACT_EDIT_LINK"
+                
+                ROW_NUMBER=$(($ROW_NUMBER+1))
 			fi
-			
+            
 			#Clear out the info for this entry
 			CONTACT_NAME=""
 			CONTACT_PHONE_NUM=""
 			CONTACT_EMAIL=""
+            CONTACT_EDIT_LINK=""
 		fi
 	done <<< "$CONTACTS_INFO" 
 }
@@ -266,6 +292,49 @@ add_contact()
     fi
 }
 
+delete_contact()
+{
+    display_all_contacts
+    
+    echo "Select a contact to delete."
+    
+    SELECTION=-1
+    while [ $SELECTION -lt 0 -o $SELECTION -gt ${#OUTPUT[@]} ]
+    do
+        read -p "Selection: " SELECTION
+        
+        # Make sure the selection is an integer
+        echo $SELECTION | egrep -q "[0-9]+"
+        if [ $? -eq 1 ]
+        then
+            # Not an integer, set it to an invalid value and try again
+            SELECTION=-1
+        fi
+    done
+    
+    SELECTION=$(($SELECTION-1)) # OUTPUT array is zero-based
+    echo "Deleting contact for ${OUTPUT[$SELECTION*4]}."
+    read -p "Are you sure? (y/N) " SELECTION
+    
+    if [ $SELECTION != "y" -a $SELECTION != "Y" ]
+    then
+        echo "Contact not deleted."
+        return
+    fi
+    
+    echo "Deleting contact..."
+    
+    local result=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" --method=DELETE ${OUTPUT[$((SELECTION*4+3))]}`
+
+    if [ $? -ne 0 ]
+    then
+        # Token is not valid
+        echo "Contact was NOT deleted successfully!"
+    else
+        echo "Contact was deleted successfully!"
+    fi
+}
+
 # Return value in $SELECTION
 display_menu()
 {
@@ -309,6 +378,9 @@ do
             ;;
         3)
             add_contact
+            ;;
+        4)
+            delete_contact
             ;;
         0)
             echo "Quitting..."
