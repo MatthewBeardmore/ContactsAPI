@@ -326,7 +326,7 @@ delete_contact()
     echo "Deleting contact for \"${OUTPUT[$selection*4]}.\""
     read -p "Are you sure? (y/N) " selection
     
-    if [ $selection == "y" -o $selection == "Y" ]
+    if [ $selection != "y" -a $selection != "Y" ]
     then
         echo "Contact not deleted."
         return
