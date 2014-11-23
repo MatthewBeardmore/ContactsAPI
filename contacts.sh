@@ -1,16 +1,22 @@
 #!/bin/bash
+#
 # Matthew Beardmore and Matthew Bowen
 # Introduction to Scripting: Project 2
 # Google Contacts API script 
-# 11/11/2014
+# 11/23/2014
+#
 
+#
 # Constants
+#
 API_CLIENT_ID="1029985346719-4ecd3h4k1s8l2v3i7hn8okobu5ct0jiq.apps.googleusercontent.com"
 API_CLIENT_SECRET="z7s_zY2MjT6AC7IruKO-BVCL"
 API_SCOPE="https://www.google.com/m8/feeds"
 
+# Attempts to load a cached access token from the .contacts_access_token file.
+#
 # Output:
-#    ACCESS_TOKEN set to the cached access token if it is valid; an empty 
+#    ACCESS_TOKEN set to the cached access token if it is valid, an empty 
 #    string otherwise.
 get_cached_access_token()
 {
@@ -56,25 +62,40 @@ get_cached_access_token()
     ACCESS_TOKEN=$cached_token
 }
 
-# $1: String
-# $2: JSON key
+# Extracts the value of a JSON string given the specified key.
 #
-# Output: JSON value on stdout
+# Parameters:
+#     1: JSON data
+#     2: JSON key
+#
+# Output: JSON value on stdout, or an empty string if the key wasn't found.
 extract_json_string()
 {
     echo "$1" | grep "$2" | awk "{ match(\$0, /\"$2\"\s*:\s*\"([^\"]*?)/, arr); print arr[1]; }"
 }
 
-# $1: String
-# $2: JSON key
+# Extracts the value of a JSON string given the specified key.
 #
-# Output: JSON value on stdout
+# Parameters:
+#     1: JSON data
+#     2: JSON key
+#
+# Output: JSON value on stdout, or an empty string if the key wasn't found.
 extract_json_number()
 {
     echo "$1" | grep "$2" | awk "{ match(\$0, /\"$2\"\s*:\s*([0-9]+)/, arr); print arr[1]; }"
 }
 
-# Logs the user in and gains access to the user's contacts
+# Authenticates the user with Google's servers.
+#
+# We use OAuth 2.0 to authenticate the user. First, we ask Google for a device
+# code and a verification URL. We then show the user both of these and ask them
+# to navigate their browser to the verification URL and enter the access code
+# given to them. Once that is done, Google gives us an access token that we
+# use to interface with the user's contacts.
+#
+# Output: ACCESS_TOKEN set to an access token used to interface with Google's
+# API.
 login_auth()
 {
     get_cached_access_token
@@ -88,10 +109,6 @@ login_auth()
     # Remove any cached access token, since it's not valid
     rm .contacts_access_token 2> /dev/null
 
-	#Get information for OAuth from the Google OAuth 2.0 server
-	#Contains device_code, user_code, verification_url, and interval
-	#verfication_url and user_code must be given to the user so that they can authorize our script
-	#We use device_code and interval to get an access_token once the user gives our script access on Google's websitee
 	local output=`wget -qO- --post-data "client_id=$API_CLIENT_ID&scope=$API_SCOPE" https://accounts.google.com/o/oauth2/device/code`
 
 	# Get the various bits of info we need
@@ -101,7 +118,7 @@ login_auth()
     local interval=`extract_json_number "$output" "interval"`
 
 	# Tell the user where to go to be able to verify the script and the code they need
-	echo "Please go to the following URL:"
+	echo "Please navigate to the following URL in your browser:"
     echo ""
     echo "    $veri_url"
     echo ""
@@ -113,22 +130,21 @@ login_auth()
 
     echo -n "Waiting for user authorization..."
     
-	# The script now has to wait for the user to authorize the script to access their account
+	# We now wait for the user to authorize us to access their account
 	while true
 	do
         # Wait for a certain number of seconds between each authorization check
         sleep $interval
         
-		#Ask the server if we have been authorized yet...
+		# Ask the server if we have been authorized yet
 		output=`wget -qO- --post-data "client_id=$API_CLIENT_ID&client_secret=$API_CLIENT_SECRET&code=$device_code&grant_type=http://oauth.net/grant_type/device/1.0" https://accounts.google.com/o/oauth2/token`
 
-		#See whether there is a line in the JSON that contains with "error" :
+		# See whether there was an error in the response
 		local error=`extract_json_string "$output" "error"`
 
 		if [ -z "$error" ]
 		then
-			#There wasn't an error, so we've been authorized!
-			#Get the access_token that we'll need to send any further requests to the contacts API
+			# There wasn't an error, so we've been authorized!
             echo " Authorized!"
             
 			ACCESS_TOKEN=`extract_json_string "$output" "access_token"`
@@ -140,16 +156,37 @@ login_auth()
 
 		if [ $error == "authorization_pending" ]
 		then
-			#This is the error we're looking for if the user hasn't authorized us yet, still waiting...
+			# Haven't been authorized yet
 			echo -n "."
 		fi
 	done
 }
 
-# Displays contact info stored in $CONTACT_INFO in a nicely formatted table
+# Prints a table of contacts received from a Google API call in a formatted
+# table. Also parses that data into an array for further consumption.
+#
+# Parameters:
+#     1: A string containing contacts data from a Google API call.
+#
+# Output: OUTPUT set to an array containing sets of 4 pieces of information:
+#     Index+0: Contact's name
+#     Index+1: Contact's phone
+#     Index+2: Contact's Email
+#     Index+3: The URL used for editing and deleting the contact.
 display_contact_info()
 {
-    parse_contact_info
+    # Clear any output from previous runs
+    unset OUTPUT
+    
+    local row_num=0
+	while read -r LINE; do
+        OUTPUT[$(($row_num*4))]=`echo "$LINE" | cut -f 1`
+        OUTPUT[$(($row_num*4+1))]=`echo "$LINE" | cut -f 2`
+        OUTPUT[$(($row_num*4+2))]=`echo "$LINE" | cut -f 3`
+        OUTPUT[$(($row_num*4+3))]=`echo "$LINE" | cut -f 4`
+
+        row_num=$(($row_num+1))
+	done < <(echo "$1" | awk -f parse_contacts_list.awk)
     
     # Print out the table header
 	printf "  # | %-25s | %-15s | %-30s\n" "Contact Name" "Phone Number" "Email"
@@ -166,93 +203,88 @@ display_contact_info()
     done
 }
 
-parse_contact_info()
-{
-    # Clear any output from previous runs
-    unset OUTPUT
-    
-    local row_num=0
-	while read -r LINE; do
-        OUTPUT[$(($row_num*4))]=`echo "$LINE" | cut -f 1`
-        OUTPUT[$(($row_num*4+1))]=`echo "$LINE" | cut -f 2`
-        OUTPUT[$(($row_num*4+2))]=`echo "$LINE" | cut -f 3`
-        OUTPUT[$(($row_num*4+3))]=`echo "$LINE" | cut -f 4`
-
-        row_num=$(($row_num+1))
-	done < <(echo "$CONTACTS_FULL" | awk -f parse_contacts_list.awk)
-}
-
-#Displays all contacts that are available for the Google account we have access to
-#Assumes we have logged in and have a correct ACCESS_TOKEN
+# Displays a list of all contacts on the user's account.
+#
+# Output: See `display_contact_info`.
 display_all_contacts()
 {
 	#Fetch the contacts file from Google with our access token
-	CONTACTS_FULL=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full`
+	local response=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full`
     
 	#Have this method display the info in a table
-	display_contact_info
+	display_contact_info "$response"
 }
 
+# Prompts the user for a query to the contact database and displays the
+# results for that query.
+#
+# Output: See `display_contact_info`.
 search_for_contacts()
 {
     local query=""
     read -p "Query: " query
     
-	CONTACTS_FULL=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full?q=$query\&v=3.0`
+	local response=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full?q=$query\&v=3.0`
 
     echo ""
     
     # Check to see if any results were found
-    local num_results=`echo "$CONTACTS_FULL" | grep openSearch:totalResults | awk 'BEGIN { FS="[<>]" } { print $3 }'`
+    local num_results=`echo "$response" | grep openSearch:totalResults | awk 'BEGIN { FS="[<>]" } { print $3 }'`
     
     if [ ! -z "$num_results" -a "$num_results" == "0" ]
     then
         echo "No results found!"
     else
-        display_contact_info
+        display_contact_info "$response"
     fi
 }
 
+# Prompts the user for information for creating a new contact, and creates it.
+#
+# Output: See `display_contact_info`.
 add_contact()
 {
-    read -p "Name: " NEW_CONTACT_NAME
-    read -p "Phone: " NEW_CONTACT_PHONE
-    read -p "Email: " NEW_CONTACT_EMAIL
-
-    TEMPLATE=`cat new_contact_template.xml`
+    local new_name=""
+    local new_phone=""
+    local new_email=""
     
-    if [ -z "$NEW_CONTACT_NAME" -a -z "$NEW_CONTACT_EMAIL" -a -z "$NEW_CONTACT_PHONE" ]
+    read -p "Name: " new_name
+    read -p "Phone: " new_phone
+    read -p "Email: " new_email
+
+    local template=`cat new_contact_template.xml`
+    
+    if [ -z "$new_name" -a -z "$new_phone" -a -z "$new_email" ]
     then
         echo "Contact not added."
         return
     fi
     
-    if [ ! -z "$NEW_CONTACT_NAME" ]
+    if [ ! -z "$new_name" ]
     then
-        TEMPLATE=`echo "$TEMPLATE" | sed s/{{NAME}}/"$NEW_CONTACT_NAME"/`
+        template=`echo "$template" | sed s/{{NAME}}/"$new_name"/`
     else
-        TEMPLATE=`echo "$TEMPLATE" | sed /{{NAME}}/d`
+        template=`echo "$template" | sed /{{NAME}}/d`
     fi
     
-    if [ ! -z "$NEW_CONTACT_EMAIL" ]
+    if [ ! -z "$new_phone" ]
     then
-        TEMPLATE=`echo "$TEMPLATE" | sed s/{{EMAIL}}/"$NEW_CONTACT_EMAIL"/`
+        template=`echo "$template" | sed s/{{PHONE}}/"$new_phone"/`
     else
-        TEMPLATE=`echo "$TEMPLATE" | sed /{{EMAIL}}/d`
+        template=`echo "$template" | sed /{{PHONE}}/d`
     fi
     
-    if [ ! -z "$NEW_CONTACT_PHONE" ]
+    if [ ! -z "$new_email" ]
     then
-        TEMPLATE=`echo "$TEMPLATE" | sed s/{{PHONE}}/"$NEW_CONTACT_PHONE"/`
+        template=`echo "$template" | sed s/{{EMAIL}}/"$new_email"/`
     else
-        TEMPLATE=`echo "$TEMPLATE" | sed /{{PHONE}}/d`
+        template=`echo "$template" | sed /{{EMAIL}}/d`
     fi
     
-    echo ""
     echo "Adding contact..."
     
     # Add the new contact
-    RESULT=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" --header="Content-Type: application/atom+xml" --post-data "$TEMPLATE" https://www.google.com/m8/feeds/contacts/default/full`
+    local result=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" --header="Content-Type: application/atom+xml" --post-data "$template" https://www.google.com/m8/feeds/contacts/default/full`
     
     if [ $? -ne 0 ]
     then
@@ -262,36 +294,39 @@ add_contact()
         echo "Contact added successfully!"
         echo ""
         
-        CONTACTS_FULL=$RESULT
-        display_contact_info
+        display_contact_info "$result"
     fi
 }
 
+# Prompts the user to delete a contact from a list of all of their contacts.
+#
+# Output: See `display_contact_info`.
 delete_contact()
 {
+    # Show the user a list of contacts they can delete
     display_all_contacts
     
     echo "Select a contact to delete."
     
-    SELECTION=-1
-    while [ $SELECTION -lt 0 -o $SELECTION -gt ${#OUTPUT[@]} ]
+    local selection=-1
+    while [ $selection -lt 1 -o $selection -gt $((${#OUTPUT[@]}/4)) ]
     do
-        read -p "Selection: " SELECTION
+        read -p "Selection: " selection
         
         # Make sure the selection is an integer
-        echo $SELECTION | egrep -q "[0-9]+"
+        echo $selection | egrep -q "[0-9]+"
         if [ $? -eq 1 ]
         then
             # Not an integer, set it to an invalid value and try again
-            SELECTION=-1
+            selection=-1
         fi
     done
     
-    SELECTION=$(($SELECTION-1)) # OUTPUT array is zero-based
-    echo "Deleting contact for ${OUTPUT[$SELECTION*4]}."
-    read -p "Are you sure? (y/N) " SELECTION
+    selection=$(($selection-1)) # OUTPUT array is zero-based
+    echo "Deleting contact for \"${OUTPUT[$selection*4]}.\""
+    read -p "Are you sure? (y/N) " selection
     
-    if [ $SELECTION != "y" -a $SELECTION != "Y" ]
+    if [ $selection == "y" -o $selection == "Y" ]
     then
         echo "Contact not deleted."
         return
@@ -299,18 +334,20 @@ delete_contact()
     
     echo "Deleting contact..."
     
-    local result=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" --method=DELETE ${OUTPUT[$((SELECTION*4+3))]}`
+    local result=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" --method=DELETE ${OUTPUT[$((selection*4+3))]}`
 
     if [ $? -ne 0 ]
     then
-        # Token is not valid
+        # Server didn't like our request
         echo "Contact was NOT deleted successfully!"
     else
         echo "Contact was deleted successfully!"
     fi
 }
 
-# Return value in $SELECTION
+# Displays a menu of actions the user can choose from.
+#
+# Output: SELECTION set to 0-4, indicating the action the user selected.
 display_menu()
 {
     echo "Please select a menu option:"
@@ -336,6 +373,10 @@ display_menu()
         fi
     done
 }
+
+#
+# Script start
+#
 
 # Login
 login_auth
