@@ -186,7 +186,7 @@ display_contact_info()
         OUTPUT[$(($row_num*4+3))]=`echo "$LINE" | cut -f 4`
 
         row_num=$(($row_num+1))
-	done < <(echo "$1" | awk -f parse_contacts_list.awk)
+	done < <(echo "$1" | awk -f parse_contacts_list.awk | sort)
     
     # Print out the table header
 	printf "  # | %-25s | %-15s | %-30s\n" "Contact Name" "Phone Number" "Email"
@@ -224,7 +224,7 @@ search_for_contacts()
     local query=""
     read -p "Query: " query
     
-	local response=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full?q=$query\&v=3.0`
+	local response=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" https://www.google.com/m8/feeds/contacts/default/full?q=$query\&v=3.0\&`
 
     echo ""
     
@@ -324,17 +324,16 @@ delete_contact()
     
     selection=$(($selection-1)) # OUTPUT array is zero-based
     echo "Deleting contact for \"${OUTPUT[$selection*4]}.\""
-    read -p "Are you sure? (y/N) " selection
+    read -p "Are you sure? (y/N) " confirm
     
-    if [ $selection != "y" -a $selection != "Y" ]
+    if [ $confirm != "y" -a $confirm != "Y" ]
     then
         echo "Contact not deleted."
         return
     fi
     
     echo "Deleting contact..."
-    
-    local result=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" --method=DELETE ${OUTPUT[$((selection*4+3))]}`
+    local result=`wget -qO- --header="Authorization: Bearer $ACCESS_TOKEN" --method=DELETE ${OUTPUT[$(($selection*4+3))]}`
 
     if [ $? -ne 0 ]
     then
